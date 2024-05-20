@@ -7,7 +7,7 @@ import pandas as pd
 from tqdm import tqdm
 from typing import Optional
 from data_creation.renumeration import advantage_6_1_to_spinglass_int
-from data_creation.utils import h5_tree
+from data_creation.utils import h5_tree, array_from_dict
 
 
 def aggregate_all(dwave_source: str, size: int, sbm_source: str, tn_source: str) -> None:
@@ -47,8 +47,7 @@ def _create_h5_file(I: np.ndarray, J: np.ndarray, V: np.ndarray, biases: np.ndar
         f.attrs["metadata"] = metadata
 
 
-def create_h5_file_from_dwave(path_to_data: str, path_to_instance: str, path_to_save: str, instance_name: str,
-                              data_name: str, file_name: str, size: int) -> None:
+def _read_instance(path_to_instance: str, instance_name: str) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     dtype_spec = {
         'i': 'int',
         'j': 'int',
@@ -61,6 +60,7 @@ def create_h5_file_from_dwave(path_to_data: str, path_to_instance: str, path_to_
     I = []
     J = []
     V = []
+    max_index = max(instance_df[['i', 'j']].max().tolist())
     for row in instance_df.itertuples():
         if row.i == row.j:
             biases.append(row.v)
@@ -68,11 +68,20 @@ def create_h5_file_from_dwave(path_to_data: str, path_to_instance: str, path_to_
             I.append(row.i)
             J.append(row.j)
             V.append(row.v)
+    if not biases:
+        biases = [0 for _ in range(max_index)]
     biases = np.array(biases)
     I = np.array(I)
     J = np.array(J)
     V = np.array(V)
 
+    return I, J, V, biases
+
+
+def create_h5_file_from_dwave(path_to_data: str, path_to_instance: str, path_to_save: str, instance_name: str,
+                              data_name: str, file_name: str, size: int) -> None:
+
+    I, J, V, biases = _read_instance(path_to_instance, instance_name)
     df = pd.read_csv(os.path.join(path_to_data, data_name), index_col=0)
     df = df.sort_values(by="energy")
     for field in ["num_occurrences", "annealing_time", "num_reads", "pause_time", "reverse"]:
@@ -91,33 +100,28 @@ def create_h5_file_from_dwave(path_to_data: str, path_to_instance: str, path_to_
     _create_h5_file(I, J, V, biases, energies, states, path_to_save, file_name, "Advantage_system6.1")
 
 
-def create_h5_from_tn(directory):
+def create_h5_from_tn(path_to_data: str, path_to_instance: str, path_to_save: str):
 
-    for filename in os.listdir(directory):
-        file = os.path.join(directory, filename)
+    for filename in os.listdir(path_to_data):
+        file = os.path.join(path_to_data, filename)
         if os.path.isfile(file) and file.endswith(".json"):
             with open(file, encoding='utf-8') as f:
                 json_data = json.load(f)
                 energies = np.array(json_data['columns'][json_data['colindex']['lookup']['drop_eng'] - 1][0])
-                state_data = json_data['columns'][json_data['colindex']['lookup']['ig_states']-1][0]
+                states = json_data['columns'][json_data['colindex']['lookup']['ig_states']-1][0]
+                states = array_from_dict(states)
 
-                print(energies)
-                #print(state_data)
-                break
-                # if json_data['columns'][json_data['colindex']['lookup']['β']-1][0] == beta and \
-                #         json_data['columns'][json_data['colindex']['lookup']['eng']-1][0] == eng and \
-                #         json_data['columns'][json_data['colindex']['lookup']['bond_dim']-1][0] == bd and \
-                #         json_data['columns'][json_data['colindex']['lookup']['max_states']-1][0] == ms:
-                #     instance_name = json_data['columns'][json_data['colindex']['lookup']['instance']-1][0].split('_')[0]
-                #     energy_data = json_data['columns'][json_data['colindex']['lookup']['drop_eng']-1][0]
-                #     state_data = json_data['columns'][json_data['colindex']['lookup']['ig_states']-1][0]
-                #     state_data_np = array_from_dict(state_data)
-                #     energy_data_np = np.array(energy_data)
-                #     ground_eng = df_min[df_min.index == instance_name]['Energy'].values[0]
+                instance_name = json_data['columns'][json_data['colindex']['lookup']['instance'] - 1][0].split('.')[0]
+                I, J, V, biases = _read_instance(path_to_instance, instance_name + ".txt")
+                _create_h5_file(I, J, V, biases, energies, states, path_to_save, instance_name + ".hdf5",
+                                "SpinGlassPEPS.jl")
+
 
 
 if __name__ == '__main__':
-    create_h5_from_tn(r"C:\Users\walle\PycharmProjects\D-Wave_Scripts\energies\square\20x20_ground_droplets_betas")
+    create_h5_from_tn(r"C:\Users\walle\PycharmProjects\D-Wave_Scripts\energies\square\20x20_ground_droplets_betas",
+                      r"C:\Users\walle\PycharmProjects\D-Wave_Scripts\instances\square_instances\square_20x20",
+                      r"C:\Users\walle\PycharmProjects\SpinGlassPEPS-database\data\square\20X20")
 
     # for size in ["P4", "P8", "P16"]:
     #     for instance_class in ["AC3", "RAU", "RCO", "CBFM-P"]:
