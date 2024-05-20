@@ -1,8 +1,10 @@
 import os
 import h5py
+import json
 import numpy as np
 import pandas as pd
 
+from tqdm import tqdm
 from typing import Optional
 from data_creation.renumeration import advantage_6_1_to_spinglass_int
 from data_creation.utils import h5_tree
@@ -80,21 +82,62 @@ def create_h5_file_from_dwave(path_to_data: str, path_to_instance: str, path_to_
     energies = np.array(energies)
     df = df.drop("energy", axis=1)
     df_dict = df.to_dict(orient='records')
-    columns = []
+    rows = []
     for row in df_dict:
         temp = {advantage_6_1_to_spinglass_int(int(i), size): k for i, k in row.items()}
         temp = dict(sorted(temp.items()))
-        columns.append([i for i in temp.values()])
-    states = np.column_stack(columns)
+        rows.append([i for i in temp.values()])
+    states = np.vstack(rows)
     _create_h5_file(I, J, V, biases, energies, states, path_to_save, file_name, "Advantage_system6.1")
 
 
+def create_h5_from_tn(directory):
+
+    for filename in os.listdir(directory):
+        file = os.path.join(directory, filename)
+        if os.path.isfile(file) and file.endswith(".json"):
+            with open(file, encoding='utf-8') as f:
+                json_data = json.load(f)
+                energies = np.array(json_data['columns'][json_data['colindex']['lookup']['drop_eng'] - 1][0])
+                state_data = json_data['columns'][json_data['colindex']['lookup']['ig_states']-1][0]
+
+                print(energies)
+                #print(state_data)
+                break
+                # if json_data['columns'][json_data['colindex']['lookup']['β']-1][0] == beta and \
+                #         json_data['columns'][json_data['colindex']['lookup']['eng']-1][0] == eng and \
+                #         json_data['columns'][json_data['colindex']['lookup']['bond_dim']-1][0] == bd and \
+                #         json_data['columns'][json_data['colindex']['lookup']['max_states']-1][0] == ms:
+                #     instance_name = json_data['columns'][json_data['colindex']['lookup']['instance']-1][0].split('_')[0]
+                #     energy_data = json_data['columns'][json_data['colindex']['lookup']['drop_eng']-1][0]
+                #     state_data = json_data['columns'][json_data['colindex']['lookup']['ig_states']-1][0]
+                #     state_data_np = array_from_dict(state_data)
+                #     energy_data_np = np.array(energy_data)
+                #     ground_eng = df_min[df_min.index == instance_name]['Energy'].values[0]
+
 
 if __name__ == '__main__':
-    path_dwave = r"C:\Users\walle\PycharmProjects\D-Wave_Scripts\energies\aggregated\pegasus_random\P4\AC3"
-    instance_path = r"C:\Users\walle\PycharmProjects\D-Wave_Scripts\instances\pegasus_random\P4\AC3"
-    save_path_h5 = r"C:\Users\walle\PycharmProjects\SpinGlassPEPS-database\data\pegasus\dwave"
-    create_h5_file_from_dwave(path_dwave, instance_path, save_path_h5, "001_sg.txt", "001.csv", "P4_AC3_001.hdf5", 4)
+    create_h5_from_tn(r"C:\Users\walle\PycharmProjects\D-Wave_Scripts\energies\square\20x20_ground_droplets_betas")
+
+    # for size in ["P4", "P8", "P16"]:
+    #     for instance_class in ["AC3", "RAU", "RCO", "CBFM-P"]:
+    #         if size == "P4":
+    #             continue
+    #         if size == "P8" and instance_class == "AC3":
+    #             continue
+    #
+    #         path_dwave = rf"C:\Users\walle\PycharmProjects\D-Wave_Scripts\energies\aggregated\pegasus_random\{size}\{instance_class}"
+    #         instance_path = rf"C:\Users\walle\PycharmProjects\D-Wave_Scripts\instances\pegasus_random\{size}\{instance_class}"
+    #
+    #         save_path_h5 = rf"C:\Users\walle\PycharmProjects\SpinGlassPEPS-database\data\pegasus\dwave\{size}\{instance_class}"
+    #         os.makedirs(save_path_h5, exist_ok=True)
+    #         for i in tqdm(range(100), desc=f"{size} {instance_class}"):
+    #             name = f"{i+1}"
+    #             name = name.zfill(3)
+    #
+    #
+    #             create_h5_file_from_dwave(path_dwave, instance_path, save_path_h5,
+    #                                    f"{name}_sg.txt", f"{name}.csv", f"{size}_{instance_class}_{name}.hdf5", 4)
 
 
 

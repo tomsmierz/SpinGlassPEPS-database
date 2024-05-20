@@ -45,7 +45,7 @@ class TestDWaveCreation(unittest.TestCase):
             states = spectrum["states"]
             energies = spectrum["energies"]
             for i in range(len(energies)):
-                state = states[:, i]
+                state = states[i, :]
                 en = 0
                 for index, bias in enumerate(biases):
                     en += bias * state[index]
