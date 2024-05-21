@@ -79,7 +79,7 @@ def _read_instance(path_to_instance: str, instance_name: str) -> tuple[np.ndarra
 
 
 def create_h5_file_from_dwave(path_to_data: str, path_to_instance: str, path_to_save: str, instance_name: str,
-                              data_name: str, file_name: str, size: int) -> None:
+                              data_name: str, file_name: str, size: int, zephyr=False) -> None:
 
     I, J, V, biases = _read_instance(path_to_instance, instance_name)
     df = pd.read_csv(os.path.join(path_to_data, data_name), index_col=0)
@@ -93,9 +93,12 @@ def create_h5_file_from_dwave(path_to_data: str, path_to_instance: str, path_to_
     df_dict = df.to_dict(orient='records')
     rows = []
     for row in df_dict:
-        temp = {advantage_6_1_to_spinglass_int(int(i), size): k for i, k in row.items()}
-        temp = dict(sorted(temp.items()))
-        rows.append([i for i in temp.values()])
+        if zephyr:
+            rows.append([i for i in row.values()])
+        else:
+            temp = {advantage_6_1_to_spinglass_int(int(i), size): k for i, k in row.items()}
+            temp = dict(sorted(temp.items()))
+            rows.append([i for i in temp.values()])
     states = np.vstack(rows)
     _create_h5_file(I, J, V, biases, energies, states, path_to_save, file_name, "Advantage_system6.1")
 
@@ -107,41 +110,82 @@ def create_h5_from_tn(path_to_data: str, path_to_instance: str, path_to_save: st
         if os.path.isfile(file) and file.endswith(".json"):
             with open(file, encoding='utf-8') as f:
                 json_data = json.load(f)
-                energies = np.array(json_data['columns'][json_data['colindex']['lookup']['drop_eng'] - 1][0])
-                states = json_data['columns'][json_data['colindex']['lookup']['ig_states']-1][0]
-                states = array_from_dict(states)
-
                 instance_name = json_data['columns'][json_data['colindex']['lookup']['instance'] - 1][0].split('.')[0]
-                I, J, V, biases = _read_instance(path_to_instance, instance_name + ".txt")
+                energies = np.array(json_data['columns'][json_data['colindex']['lookup']['drop_eng'] - 1][0])
+                states = json_data['columns'][json_data['colindex']['lookup']['ig_states'] - 1][0]
+                states = array_from_dict(states)
+                saved_file_path = os.path.join(path_to_save, instance_name + ".hdf5")
+                if os.path.isfile(saved_file_path):
+                    with h5py.File(saved_file_path, "r") as f:
+
+                        spectrum = f["Spectrum"]
+                        states_read = np.array(spectrum["states"])
+                        energies_read = np.array(spectrum["energies"])
+                        indices_of_added_rows = []
+                        added_energies = []
+                        for i, row in enumerate(states):
+                            is_in_file = np.any(np.all(states_read == row, axis=1))
+
+                            if not is_in_file:
+                                indices_of_added_rows.append(i)
+                                added_energies.append(energies[i])
+                                energies_read = np.append(energies_read, energies[i])
+                                states_read = np.vstack([states_read, row])
+                        indices_to_sort = np.argsort(energies_read)
+                        energies = energies_read[indices_to_sort]
+                        states = states_read[indices_to_sort]
+                    I, J, V, biases = _read_instance(path_to_instance, instance_name + ".txt")
+
+                else:
+                    I, J, V, biases = _read_instance(path_to_instance, instance_name + ".txt")
                 _create_h5_file(I, J, V, biases, energies, states, path_to_save, instance_name + ".hdf5",
-                                "SpinGlassPEPS.jl")
+                                    "SpinGlassPEPS.jl")
 
 
 
 if __name__ == '__main__':
-    create_h5_from_tn(r"C:\Users\walle\PycharmProjects\D-Wave_Scripts\energies\square\20x20_ground_droplets_betas",
-                      r"C:\Users\walle\PycharmProjects\D-Wave_Scripts\instances\square_instances\square_20x20",
-                      r"C:\Users\walle\PycharmProjects\SpinGlassPEPS-database\data\square\20X20")
-
-    # for size in ["P4", "P8", "P16"]:
-    #     for instance_class in ["AC3", "RAU", "RCO", "CBFM-P"]:
-    #         if size == "P4":
-    #             continue
-    #         if size == "P8" and instance_class == "AC3":
-    #             continue
+    # for size in [30,40, 50]:
+    #     print(f"working for size {size}")
+    #     save_path_h5 = fr"C:\Users\walle\PycharmProjects\SpinGlassPEPS-database\data\square\tn\{size}X{size}"
+    #     os.makedirs(save_path_h5, exist_ok=True)
+    #     create_h5_from_tn(fr"C:\Users\walle\PycharmProjects\D-Wave_Scripts\energies\square\{size}x{size}_ground_droplets_betas",
+    #                     fr"C:\Users\walle\PycharmProjects\D-Wave_Scripts\instances\square_instances\square_{size}x{size}",
+    #                   save_path_h5)
     #
-    #         path_dwave = rf"C:\Users\walle\PycharmProjects\D-Wave_Scripts\energies\aggregated\pegasus_random\{size}\{instance_class}"
-    #         instance_path = rf"C:\Users\walle\PycharmProjects\D-Wave_Scripts\instances\pegasus_random\{size}\{instance_class}"
+    # for size in [20, 30, 40, 50]:
+    #     print(f"working for size {size} diagonal")
+    #     save_path_h5 = fr"C:\Users\walle\PycharmProjects\SpinGlassPEPS-database\data\square_diag\tn\{size}X{size}"
+    #     os.makedirs(save_path_h5, exist_ok=True)
+    #     create_h5_from_tn(
+    #         fr"C:\Users\walle\PycharmProjects\D-Wave_Scripts\energies\square_diagonal\{size}x{size}_ground_droplets_betas",
+    #         fr"C:\Users\walle\PycharmProjects\D-Wave_Scripts\instances\square_diag_instances\square_diag_{size}x{size}",
+    #         save_path_h5)
     #
-    #         save_path_h5 = rf"C:\Users\walle\PycharmProjects\SpinGlassPEPS-database\data\pegasus\dwave\{size}\{instance_class}"
-    #         os.makedirs(save_path_h5, exist_ok=True)
-    #         for i in tqdm(range(100), desc=f"{size} {instance_class}"):
-    #             name = f"{i+1}"
-    #             name = name.zfill(3)
-    #
-    #
-    #             create_h5_file_from_dwave(path_dwave, instance_path, save_path_h5,
-    #                                    f"{name}_sg.txt", f"{name}.csv", f"{size}_{instance_class}_{name}.hdf5", 4)
+    for size in [4]:#, 8, 16]:
+        for instance_class in ["AC3", "RAU", "RCO", "CBFM-P"]:
 
+            path_dwave = rf"C:\Users\walle\PycharmProjects\D-Wave_Scripts\energies\aggregated\pegasus_random\P{size}\{instance_class}"
+            instance_path = rf"C:\Users\walle\PycharmProjects\D-Wave_Scripts\instances\pegasus_random\P{size}\{instance_class}"
 
+            save_path_h5 = rf"C:\Users\walle\PycharmProjects\SpinGlassPEPS-database\data\pegasus\dwave\P{size}\{instance_class}"
+            os.makedirs(save_path_h5, exist_ok=True)
+            for i in tqdm(range(100), desc=f"P{size} {instance_class}"):
+                name = f"{i+1}"
+                name = name.zfill(3)
 
+                create_h5_file_from_dwave(path_dwave, instance_path, save_path_h5,
+                                       f"{name}_sg.txt", f"{name}.csv", f"{size}_{instance_class}_{name}.hdf5", size)
+
+    for size in [3, 4]:
+        for instance_class in ["RCO", "RAU"]:
+            path_dwave = rf"C:\Users\walle\PycharmProjects\D-Wave_Scripts\energies\aggregated\zephyr_random\Z{size}\{instance_class}"
+            instance_path = rf"C:\Users\walle\PycharmProjects\D-Wave_Scripts\instances\zephyr_random\Z{size}\{instance_class}"
+
+            save_path_h5 = rf"C:\Users\walle\PycharmProjects\SpinGlassPEPS-database\data\pegasus\dwave\Z{size}\{instance_class}"
+            os.makedirs(save_path_h5, exist_ok=True)
+            for i in tqdm(range(100), desc=f"Z{size} {instance_class}"):
+                name = f"{i+1}"
+                name = name.zfill(3)
+
+                create_h5_file_from_dwave(path_dwave, instance_path, save_path_h5,
+                                       f"{name}_sg.txt", f"{name}.csv", f"Z{size}_{instance_class}_{name}.hdf5", size, zephyr=True)

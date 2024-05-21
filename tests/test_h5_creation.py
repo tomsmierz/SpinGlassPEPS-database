@@ -104,6 +104,9 @@ class TestTNCreation(unittest.TestCase):
 
                 self.assertAlmostEqual(en, energies[i], places=6)
 
+    def test_updating_existing_file(self):
+        ...
+
 
 if __name__ == '__main__':
     unittest.main()
