@@ -33,6 +33,7 @@ def array_from_dict(dict_list: list[dict]) -> np.ndarray:
     max_index = max(int(key) for d in dict_list for key in d.keys())
     result_array = np.zeros((num_states, max_index))
     for i, d in enumerate(dict_list):
+        d = dict(sorted(d.items()))
         for key, value in d.items():
             result_array[i, int(key) - 1] = value
     return result_array

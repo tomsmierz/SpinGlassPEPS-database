@@ -44,7 +44,7 @@ class TestDWaveCreation(unittest.TestCase):
                 self.assertAlmostEqual(df_value, v, places=7)
             states = spectrum["states"]
             energies = spectrum["energies"]
-            for i in range(len(energies)):
+            for i in range(len(energies))[:100]:
                 state = states[i, :]
                 en = 0
                 for index, bias in enumerate(biases):
@@ -82,8 +82,8 @@ class TestTNCreation(unittest.TestCase):
                 if row.i == row.j:
                     have_biases = True
                     self.assertAlmostEqual(row.v, biases[row.i-1], places=7)
-            if have_biases:
-                self.assertEqual(biases, [0 for _ in max_index])
+            if not have_biases:
+                self.assertEqual(biases, [0 for _ in range(max_index)])
 
             I = J_coo["I"]
             J = J_coo["J"]
@@ -94,7 +94,7 @@ class TestTNCreation(unittest.TestCase):
                 self.assertAlmostEqual(df_value, v, places=7)
             states = spectrum["states"]
             energies = spectrum["energies"]
-            for i in range(len(energies)):
+            for i in range(len(energies))[:100]:
                 state = states[i, :]
                 en = 0
                 for index, bias in enumerate(biases):

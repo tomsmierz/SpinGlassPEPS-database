@@ -112,3 +112,6 @@ def advantage_6_1_to_spinglass(node: tuple, size: int) -> int:
     y_off = {(4, t): 2 for t in [0, 1, 2]} | {(8, 2): 3, (8, 0): 2, (8, 1): 2} | {(16, t): 0 for t in [0, 1, 2]}
     x_off = {(4, t): 3 for t in [0, 1, 2]} | {(8, 2): 4, (8, 0): 5, (8, 1): 5} | {(16, t): 0 for t in [0, 1, 2]}
     return nice_to_spin_glass(node=((t-t_off[size]) % 3, y-y_off[(size, t)], x-x_off[(size, t)], u, k), size=size)
+
+def prototype_1_1_to_spinglass_int(node: int):
+    ...

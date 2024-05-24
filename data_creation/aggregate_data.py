@@ -3,9 +3,10 @@ import h5py
 import json
 import numpy as np
 import pandas as pd
-
+import pickle
 from tqdm import tqdm
 from typing import Optional
+from scipy.sparse import coo_matrix
 from data_creation.renumeration import advantage_6_1_to_spinglass_int
 from data_creation.utils import h5_tree, array_from_dict
 
@@ -47,7 +48,8 @@ def _create_h5_file(I: np.ndarray, J: np.ndarray, V: np.ndarray, biases: np.ndar
         f.attrs["metadata"] = metadata
 
 
-def _read_instance(path_to_instance: str, instance_name: str) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+def _read_instance(path_to_instance: str, instance_name: str) -> \
+        tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     dtype_spec = {
         'i': 'int',
         'j': 'int',
@@ -56,20 +58,33 @@ def _read_instance(path_to_instance: str, instance_name: str) -> tuple[np.ndarra
     pd.set_option('display.precision', 20)
     instance_df = pd.read_csv(os.path.join(path_to_instance, instance_name), sep=" ", index_col=False,
                               header=None, comment='#', names=["i", "j", "v"], dtype=dtype_spec)
+    max_index = max(instance_df[['i', 'j']].max().tolist())
+    dense_matrix = np.zeros((max_index, max_index), dtype="float64")
+    biases_dic = {}
     biases = []
     I = []
     J = []
     V = []
-    max_index = max(instance_df[['i', 'j']].max().tolist())
     for row in instance_df.itertuples():
         if row.i == row.j:
-            biases.append(row.v)
+            biases_dic[row.i] = row.v
         else:
-            I.append(row.i)
-            J.append(row.j)
-            V.append(row.v)
-    if not biases:
-        biases = [0 for _ in range(max_index)]
+            dense_matrix[row.i-1, row.j-1] = row.v
+
+    for index in range(1, max_index+1):
+        if index in biases_dic.keys():
+            biases.append(biases_dic[index])
+        else:
+            biases.append(0)
+
+    for i in range(dense_matrix.shape[0]):
+        for j in range(dense_matrix.shape[1]):
+            element = dense_matrix[i, j]
+            if element != 0:
+                I.append(i+1)
+                J.append(j+1)
+                V.append(element)
+
     biases = np.array(biases)
     I = np.array(I)
     J = np.array(J)
@@ -90,32 +105,56 @@ def create_h5_file_from_dwave(path_to_data: str, path_to_instance: str, path_to_
     energies = df["energy"].to_numpy()
     energies = np.array(energies)
     df = df.drop("energy", axis=1)
+    max_index = max(max(I), max(J))
+    if zephyr:
+        pass
+
+    else:
+        renumerated = {i: advantage_6_1_to_spinglass_int(int(i), size) for i in df.columns}
+        df.rename(columns=renumerated, inplace=True)
+        df = df[sorted(df.columns)]
     df_dict = df.to_dict(orient='records')
     rows = []
+
     for row in df_dict:
-        if zephyr:
-            rows.append([i for i in row.values()])
+        if not zephyr:
+            state = []
+            for index in range(1, max_index+1):
+                if index in row.keys():
+                    state.append(row[index])
+                else:
+                    state.append(0)
         else:
-            temp = {advantage_6_1_to_spinglass_int(int(i), size): k for i, k in row.items()}
-            temp = dict(sorted(temp.items()))
-            rows.append([i for i in temp.values()])
+            indices = sorted(list(set(list(I) + list(J))))
+            state = []
+            row_values = iter(row.values())
+            for index in range(1, max_index + 1):
+                if index in indices:
+                    spin = next(row_values)
+                    state.append(spin)
+                else:
+                    state.append(0)
+
+        rows.append(state)
+
     states = np.vstack(rows)
     _create_h5_file(I, J, V, biases, energies, states, path_to_save, file_name, "Advantage_system6.1")
 
 
 def create_h5_from_tn(path_to_data: str, path_to_instance: str, path_to_save: str):
 
-    for filename in os.listdir(path_to_data):
+    for filename in tqdm(os.listdir(path_to_data)):
         file = os.path.join(path_to_data, filename)
         if os.path.isfile(file) and file.endswith(".json"):
             with open(file, encoding='utf-8') as f:
                 json_data = json.load(f)
                 instance_name = json_data['columns'][json_data['colindex']['lookup']['instance'] - 1][0].split('.')[0]
+                instance_name = instance_name.split("_")[0]
                 energies = np.array(json_data['columns'][json_data['colindex']['lookup']['drop_eng'] - 1][0])
                 states = json_data['columns'][json_data['colindex']['lookup']['ig_states'] - 1][0]
                 states = array_from_dict(states)
                 saved_file_path = os.path.join(path_to_save, instance_name + ".hdf5")
-                if os.path.isfile(saved_file_path):
+                if os.path.isfile(os.path.join(saved_file_path, instance_name + '.hdf5')):
                     with h5py.File(saved_file_path, "r") as f:
 
                         spectrum = f["Spectrum"]
@@ -134,58 +173,35 @@ def create_h5_from_tn(path_to_data: str, path_to_instance: str, path_to_save: st
                         indices_to_sort = np.argsort(energies_read)
                         energies = energies_read[indices_to_sort]
                         states = states_read[indices_to_sort]
-                    I, J, V, biases = _read_instance(path_to_instance, instance_name + ".txt")
+                    I, J, V, biases = _read_instance(path_to_instance, instance_name + "_sg.txt")
 
                 else:
-                    I, J, V, biases = _read_instance(path_to_instance, instance_name + ".txt")
+                    I, J, V, biases = _read_instance(path_to_instance, instance_name + "_sg.txt")
                 _create_h5_file(I, J, V, biases, energies, states, path_to_save, instance_name + ".hdf5",
                                     "SpinGlassPEPS.jl")
 
 
-
 if __name__ == '__main__':
-    # for size in [30,40, 50]:
-    #     print(f"working for size {size}")
-    #     save_path_h5 = fr"C:\Users\walle\PycharmProjects\SpinGlassPEPS-database\data\square\tn\{size}X{size}"
-    #     os.makedirs(save_path_h5, exist_ok=True)
-    #     create_h5_from_tn(fr"C:\Users\walle\PycharmProjects\D-Wave_Scripts\energies\square\{size}x{size}_ground_droplets_betas",
-    #                     fr"C:\Users\walle\PycharmProjects\D-Wave_Scripts\instances\square_instances\square_{size}x{size}",
-    #                   save_path_h5)
-    #
-    # for size in [20, 30, 40, 50]:
-    #     print(f"working for size {size} diagonal")
-    #     save_path_h5 = fr"C:\Users\walle\PycharmProjects\SpinGlassPEPS-database\data\square_diag\tn\{size}X{size}"
-    #     os.makedirs(save_path_h5, exist_ok=True)
-    #     create_h5_from_tn(
-    #         fr"C:\Users\walle\PycharmProjects\D-Wave_Scripts\energies\square_diagonal\{size}x{size}_ground_droplets_betas",
-    #         fr"C:\Users\walle\PycharmProjects\D-Wave_Scripts\instances\square_diag_instances\square_diag_{size}x{size}",
-    #         save_path_h5)
-    #
-    for size in [4]:#, 8, 16]:
-        for instance_class in ["AC3", "RAU", "RCO", "CBFM-P"]:
+    instances_base = rf"C:\Users\walle\PycharmProjects\D-Wave_Scripts\instances"
+    ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    dw_pegasus_files = os.path.join(ROOT, "data", "pegasus", "dwave")
+    tn_pegasus_files = os.path.join(ROOT, "data", "pegasus", "tn")
+    dw_zephyr_files = os.path.join(ROOT, "data", "zephyr", "dwave")
+    tn_zephyr_files = os.path.join(ROOT, "data", "zephyr", "tn")
 
-            path_dwave = rf"C:\Users\walle\PycharmProjects\D-Wave_Scripts\energies\aggregated\pegasus_random\P{size}\{instance_class}"
-            instance_path = rf"C:\Users\walle\PycharmProjects\D-Wave_Scripts\instances\pegasus_random\P{size}\{instance_class}"
+    instance_class = "CBFM-P"
+    truncation = "truncate2^16"
+    dw_p16_data = rf"C:\Users\walle\PycharmProjects\D-Wave_Scripts\energies\aggregated\pegasus_random\P16\{instance_class}"
+    tn_p8_data = rf"C:\Users\walle\PycharmProjects\D-Wave_Scripts\energies\pegasus_random_tn\P8\{instance_class}\final_bench_{truncation}"
+    size = "P8"
+    dw_z3_data = rf"C:\Users\walle\PycharmProjects\D-Wave_Scripts\energies\aggregated\zephyr_random\Z3\{instance_class}"
 
-            save_path_h5 = rf"C:\Users\walle\PycharmProjects\SpinGlassPEPS-database\data\pegasus\dwave\P{size}\{instance_class}"
-            os.makedirs(save_path_h5, exist_ok=True)
-            for i in tqdm(range(100), desc=f"P{size} {instance_class}"):
-                name = f"{i+1}"
-                name = name.zfill(3)
+    instance_name = os.path.join(instances_base, "pegasus_random", size, instance_class)
+    save = os.path.join(dw_zephyr_files, size, instance_class)
+    save_tn = os.path.join(tn_pegasus_files, size, truncation, instance_class)
+    # for file in tqdm(os.listdir(dw_z3_data)):
+    #     if file.endswith(".csv"):
+    #         name = file.split(".")[0]
+    #         create_h5_file_from_dwave(dw_z3_data, instance_name, save, name + "_sg.txt", file, f"{size}_{instance_class}_{name}.hdf5", 3, zephyr=True)
 
-                create_h5_file_from_dwave(path_dwave, instance_path, save_path_h5,
-                                       f"{name}_sg.txt", f"{name}.csv", f"{size}_{instance_class}_{name}.hdf5", size)
-
-    for size in [3, 4]:
-        for instance_class in ["RCO", "RAU"]:
-            path_dwave = rf"C:\Users\walle\PycharmProjects\D-Wave_Scripts\energies\aggregated\zephyr_random\Z{size}\{instance_class}"
-            instance_path = rf"C:\Users\walle\PycharmProjects\D-Wave_Scripts\instances\zephyr_random\Z{size}\{instance_class}"
-
-            save_path_h5 = rf"C:\Users\walle\PycharmProjects\SpinGlassPEPS-database\data\pegasus\dwave\Z{size}\{instance_class}"
-            os.makedirs(save_path_h5, exist_ok=True)
-            for i in tqdm(range(100), desc=f"Z{size} {instance_class}"):
-                name = f"{i+1}"
-                name = name.zfill(3)
-
-                create_h5_file_from_dwave(path_dwave, instance_path, save_path_h5,
-                                       f"{name}_sg.txt", f"{name}.csv", f"Z{size}_{instance_class}_{name}.hdf5", size, zephyr=True)
+    create_h5_from_tn(tn_p8_data, instance_name, save_tn)
