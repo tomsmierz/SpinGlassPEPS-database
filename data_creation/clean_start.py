@@ -7,6 +7,8 @@ import pandas as pd
 import numpy as np
 from copy import deepcopy
 from scipy.sparse import coo_matrix
+from math import isclose
+from tqdm import tqdm
 
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -67,49 +69,37 @@ def read_instance_states_energies_from_tn(json_file):
         instance_name = instance_name.split("_")[0]
         energies = np.array(json_data['columns'][json_data['colindex']['lookup']['drop_eng'] - 1][0])
         states = json_data['columns'][json_data['colindex']['lookup']['ig_states'] - 1][0]
-        rows = []
-        for d in states:
-            d = dict(sorted(d.items(), key=lambda item: int(item[0])))
-            temp = [i for i in d.values()]
-            rows.append(temp)
-        states_array = np.vstack(rows)
+
+        return instance_name, states, energies,
 
 
-        return instance_name, energies, states_array, states
+def merge_states_from_json(data_list, name, holes):
+    temp = []
+    for dat in data_list:
+        if dat[0] == name:
+            temp.append((dat[1], dat[2]))
+    energies_temp = []
+    states_temp = []
+    for state_energy in temp:
+        for state in state_energy[0]:
+            states_temp.append(state)
+        for energy in state_energy[1]:
+            energies_temp.append(energy)
 
+    energies = np.hstack(energies_temp)
+    states_array = []
+    for state in states_temp:
+        keys = [int(k) for k in state.keys()]
+        max_index = max(keys)
+        for i in range(1, int(max_index)+1):
+            if str(i) not in state.keys():
+                state[str(i)] = 0
+        state = dict(sorted(state.items(), key=lambda k: int(k[0])))
+        temp = [i for i in state.values()]
+        states_array.append(temp)
+    states = np.vstack(states_array)
 
-def merge_states_from_son(data_list):
-    names = list(set([dat[0] for dat in data_list]))
-    energyies_state = {}
-    for name in names:
-        temp = []
-        for dat in data_list:
-            if dat[0] == name:
-                temp.append((dat[1], dat[2]))
-        energyies_state[name] = temp
-    final_dictionary = {}
-    for name in names:
-        list_of_energies_states = energyies_state[name]
-        energies_temp = []
-        states_temp = []
-        for energy_state in list_of_energies_states:
-            energies_temp.append(energy_state[0])
-            states_temp.append(energy_state[1])
-        energies = np.hstack(energies_temp)
-        states = np.vstack(states_temp)
-        final_dictionary[name] = (states, energies)
-        # remove duplicate states
-        # unique_states, indices = np.unique(states, axis=0, return_index=True)
-        # final_dictionary[name] = (energies, states)
-        # all_indices = np.arange(states.shape[0])
-        # sorted_indices = np.sort(indices)
-        # duplicate_indices = np.setdiff1d(all_indices, sorted_indices)
-        # mask = np.ones(len(energies), dtype=bool)
-        # mask[duplicate_indices] = False
-        # filtered_energies = energies[mask]
-
-        #final_dictionary[name] = (unique_states, filtered_energies)
-    return final_dictionary
+    return states, energies
 
 
 def read_dwave_solutions(path_to_solution):
@@ -144,20 +134,36 @@ def create_h5_file(I: np.ndarray, J: np.ndarray, V: np.ndarray, biases: np.ndarr
         f.attrs["metadata"] = metadata
 
 
+def inefective_renumeration(path_to_instance, name):
+    df = load_instance_to_dataframe(os.path.join(path_to_instance, name + "_sg.txt"))
+    with open(os.path.join(instances_zephyr, name + "_dv.pkl"), "rb") as f:
+        h, J = pickle.load(f)
+    biases_dict = {}
+    for row in df.itertuples():
+        if row.i == row.j:
+            biases_dict[row.i] = row.v
+    renumeration = {}
+    for item, value in h.items():
+        for key, row_v in biases_dict.items():
+            if isclose(value, row_v):
+                renumeration[item] = key
+
 def create_h5_from_tn(path_to_instance, path_to_solutions, where_to_save):
     data = []
     for file in os.listdir(path_to_solutions):
         if file.endswith(".json"):
             file_path = os.path.join(path_to_solutions, file)
-            name, energies, states, _ = read_instance_states_energies_from_tn(file_path)
+            name, energies, states = read_instance_states_energies_from_tn(file_path)
             data.append((name, energies, states))
-    dictionary_of_merged_solutions = merge_states_from_son(data)
-    for name in dictionary_of_merged_solutions.keys():
+
+    names = list(set([data_point[0] for data_point in data]))
+    for name in names:
         real_name = name + "_sg.txt"
         instance = os.path.join(path_to_instance, real_name)
         I, J, V, biases, holes = get_instance_data(instance)
-        states = dictionary_of_merged_solutions[name][0]
-        energies = dictionary_of_merged_solutions[name][1]
+        states, energies = merge_states_from_json(data, name, holes)
+
+
         create_h5_file(I, J, V, biases, energies, states, where_to_save, name + ".hdf5", "SpinGlassPEPS")
 
 
@@ -177,13 +183,51 @@ def create_h5_from_dw(path_to_instance, path_to_solution, where_to_save, name, s
     create_h5_file(I, J, V, biases, energies, states, where_to_save, f"{size}_{instance_class}_{name}.hdf5", "Advantage_prototype1.1")
 
 
+def create_h5_from_dw_zephyr(path_to_instance, path_to_solution, where_to_save, name, size, instance_class,
+                             renumerate: bool = False):
+    path_to_instance_dw = os.path.join(path_to_instance, name + "_dv.pkl")
+    path_to_instance = os.path.join(path_to_instance, name + "_sg.txt")
+    path_to_solution = os.path.join(path_to_solution, name + ".csv")
+    I, J, V, biases, holes = get_instance_data(path_to_instance)
+    df = load_instance_to_dataframe(path_to_instance)
+    energies, dict_of_states = read_dwave_solutions(path_to_solution)
+
+    states = []
+    if not renumerate:
+        for state in dict_of_states:
+            for hole in holes:
+                state[str(hole)] = 0
+        for idx, state_dict in enumerate(dict_of_states):
+            state_dict_int = {int(k): v for k, v in state_dict.items()}
+            ordered_state_dict = dict(sorted(state_dict_int.items()))
+            state = np.array([i for i in ordered_state_dict.values()])
+            states.append(state)
+    else:
+        with open(path_to_instance_dw, "rb") as f:
+            h, _ = pickle.load(f)
+        nodes = df["i"].unique()
+        renumeration = {dw: nodes[idx] for idx, dw in enumerate(h.keys())}
+        for idx, state_dict in enumerate(dict_of_states):
+            state_dict_renumerated = {renumeration[int(k)]: v for k, v in state_dict.items()}
+            state_dict_renumerated_ordered = dict(sorted(state_dict_renumerated.items()))
+            state = np.array([i for i in state_dict_renumerated_ordered.values()])
+            for hole in holes:
+                state = np.insert(state, hole, 0)
+            states.append(state)
+
+    states = np.vstack(states)
+    create_h5_file(I, J, V, biases, energies, states, where_to_save, f"{size}_{instance_class}_{name}.hdf5",
+                   "Advantage_prototype1.1")
+
 
 if __name__ == '__main__':
     size = "Z3"
-    instances_class = "RAU"
-    truncation = "truncate2^16"
+    instances_class = "RCO"
+    truncation = "truncate2^12"
 
     solutions_pegasus_tn = os.path.join(path_to_solutions_base, "pegasus_random_tn", size, instances_class, f"final_bench_{truncation}")
+    solutions_zephyr_tn = os.path.join(path_to_solutions_base, "zephyr_random_tn", size, instances_class,
+                                        f"final_bench_{truncation}")
     solutions_zephyr_dw = os.path.join(path_to_solutions_base, "aggregated", "zephyr_random", size, instances_class)
 
     instances_pegasus = os.path.join(instances_base, "pegasus_random", size, instances_class)
@@ -191,6 +235,12 @@ if __name__ == '__main__':
 
     save_pegasus_tn = os.path.join(ROOT, "data", "pegasus", "tn", size, truncation, instances_class)
     save_zephyr_dw = os.path.join(ROOT, "data", "zephyr", "dwave", size, instances_class)
+    save_zephyr_tn = os.path.join(ROOT, "data", "zephyr", "tn", size, truncation, instances_class)
 
-    # create_h5_from_tn(instances_pegasus, solutions_pegasus_tn, save_pegasus_tn)
-    create_h5_from_dw(instances_zephyr, solutions_zephyr_dw, save_zephyr_dw, "001", size, instances_class)
+    if not os.path.exists(save_zephyr_dw):
+        os.makedirs(save_zephyr_dw)
+
+    #create_h5_from_tn(instances_zephyr, solutions_zephyr_tn, save_zephyr_tn)
+    for i in tqdm(range(1, 101)):
+        name = str(i).zfill(3)
+        create_h5_from_dw_zephyr(instances_zephyr, solutions_zephyr_dw, save_zephyr_dw, name, size, instances_class, True)
