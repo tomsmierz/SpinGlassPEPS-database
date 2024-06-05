@@ -4,11 +4,10 @@ import pandas as pd
 import numpy as np
 from tqdm import tqdm
 from math import isclose
-from clean_start import load_instance_to_matrix
+from clean_start import load_instance_to_matrix, load_instance_to_dataframe
 
 # PROBLEMS:
-# TN P8 CBFM-P
-# TN P16 RAU, RCO,
+# Z4 RCO
 
 
 if __name__ == '__main__':
@@ -22,13 +21,14 @@ if __name__ == '__main__':
 
     size = "Z3"
     instances_class = "RAU"
-    truncation = "truncate2^16"
+    truncation = "truncate2^12"
 
     instances_pegasus = os.path.join(instances_base, "pegasus_random", size, instances_class)
     instances_zephyr = os.path.join(instances_base, "zephyr_random", size, instances_class)
 
     save_pegasus_tn = os.path.join(ROOT, "data", "pegasus", "tn", size, truncation, instances_class)
     save_zephyr_dw = os.path.join(ROOT, "data", "zephyr", "dwave", size, instances_class)
+    save_zephyr_tn = os.path.join(ROOT, "data", "zephyr", "tn", size, truncation, instances_class)
 
     for file in tqdm(os.listdir(save_zephyr_dw)):
         if file.endswith(".hdf5"):
@@ -49,12 +49,22 @@ if __name__ == '__main__':
                     matrix[i - 1, j - 1] = V[index2]
                 instance_name = file.split(".")[0]
                 instance_name = instance_name.split("_")[2]
+                # test if matrix is corecly loaded
                 matrix2, _ = load_instance_to_matrix(os.path.join(instances_zephyr, instance_name + "_sg.txt"))
                 assert np.array_equal(biases, matrix2.diagonal())
                 np.fill_diagonal(matrix2, 0)
                 assert np.array_equal(matrix, matrix2)
+                # check biases
+                instance_df = load_instance_to_dataframe(os.path.join(instances_zephyr, instance_name + "_sg.txt"))
+                for row in instance_df.itertuples():
+                    if row.i == row.j:
+                        assert isclose(row.v, biases[row.i-1])
+                    else:
+                        assert isclose(matrix[row.i-1, row.j-1], row.v)
+
                 for index, energy in enumerate(energies):
                     state = states[index, :]
+                    assert len(state) == len(biases)
                     linear = np.dot(biases, state)
                     quadratic = np.dot(state, np.dot(matrix2, state.T))
-                    assert energy == quadratic + linear
+                    assert isclose(energy, quadratic + linear)
