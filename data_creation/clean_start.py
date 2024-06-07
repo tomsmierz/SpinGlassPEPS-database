@@ -196,7 +196,8 @@ def create_h5_from_dw_zephyr(path_to_instance, path_to_solution, where_to_save, 
     if not renumerate:
         for state in dict_of_states:
             for hole in holes:
-                state[str(hole)] = 0
+                if str(hole) not in state.keys():
+                    state[str(hole)] = 0
         for idx, state_dict in enumerate(dict_of_states):
             state_dict_int = {int(k): v for k, v in state_dict.items()}
             ordered_state_dict = dict(sorted(state_dict_int.items()))
@@ -212,7 +213,8 @@ def create_h5_from_dw_zephyr(path_to_instance, path_to_solution, where_to_save, 
             state_dict_renumerated_ordered = dict(sorted(state_dict_renumerated.items()))
             state = np.array([i for i in state_dict_renumerated_ordered.values()])
             for hole in holes:
-                state = np.insert(state, hole, 0)
+                if hole + 1 not in state_dict_renumerated.keys():
+                    state = np.insert(state, hole, 0)
             states.append(state)
 
     states = np.vstack(states)
@@ -222,7 +224,7 @@ def create_h5_from_dw_zephyr(path_to_instance, path_to_solution, where_to_save, 
 
 if __name__ == '__main__':
     size = "Z3"
-    instances_class = "RCO"
+    instances_class = "RAU"
     truncation = "truncate2^12"
 
     solutions_pegasus_tn = os.path.join(path_to_solutions_base, "pegasus_random_tn", size, instances_class, f"final_bench_{truncation}")
@@ -234,13 +236,15 @@ if __name__ == '__main__':
     instances_zephyr = os.path.join(instances_base, "zephyr_random", size, instances_class)
 
     save_pegasus_tn = os.path.join(ROOT, "data", "pegasus", "tn", size, truncation, instances_class)
-    save_zephyr_dw = os.path.join(ROOT, "data", "zephyr", "dwave", size, instances_class)
+    save_zephyr_dw = os.path.join(ROOT, "data", "zephyr", "dwave", "DW_" + size, instances_class)
     save_zephyr_tn = os.path.join(ROOT, "data", "zephyr", "tn", size, truncation, instances_class)
 
     if not os.path.exists(save_zephyr_dw):
         os.makedirs(save_zephyr_dw)
 
     #create_h5_from_tn(instances_zephyr, solutions_zephyr_tn, save_zephyr_tn)
-    for i in tqdm(range(1, 101)):
+    for i in tqdm(range(1,101)):
         name = str(i).zfill(3)
-        create_h5_from_dw_zephyr(instances_zephyr, solutions_zephyr_dw, save_zephyr_dw, name, size, instances_class, True)
+        create_h5_from_dw_zephyr(instances_zephyr, solutions_zephyr_dw, save_zephyr_dw, name, size, instances_class, renumerate=True)
+
+

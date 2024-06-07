@@ -19,15 +19,15 @@ if __name__ == '__main__':
     dw_zephyr_files = os.path.join(ROOT, "data", "zephyr", "dwave")
     tn_zephyr_files = os.path.join(ROOT, "data", "zephyr", "tn")
 
-    size = "Z3"
-    instances_class = "RAU"
+    size = "Z4"
+    instances_class = "RCO"
     truncation = "truncate2^12"
 
     instances_pegasus = os.path.join(instances_base, "pegasus_random", size, instances_class)
     instances_zephyr = os.path.join(instances_base, "zephyr_random", size, instances_class)
 
     save_pegasus_tn = os.path.join(ROOT, "data", "pegasus", "tn", size, truncation, instances_class)
-    save_zephyr_dw = os.path.join(ROOT, "data", "zephyr", "dwave", size, instances_class)
+    save_zephyr_dw = os.path.join(ROOT, "data", "zephyr", "dwave", "DW_" + size, instances_class)
     save_zephyr_tn = os.path.join(ROOT, "data", "zephyr", "tn", size, truncation, instances_class)
 
     for file in tqdm(os.listdir(save_zephyr_dw)):
@@ -68,3 +68,4 @@ if __name__ == '__main__':
                     linear = np.dot(biases, state)
                     quadratic = np.dot(state, np.dot(matrix2, state.T))
                     assert isclose(energy, quadratic + linear)
+
